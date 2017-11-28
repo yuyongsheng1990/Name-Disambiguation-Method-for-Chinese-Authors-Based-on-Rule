@@ -1,0 +1,255 @@
+package process_method;
+//1.20170921-于永胜-用于中文作者姓名消歧，基于规则：合著者相同或单位相同，即认为是同一个人。
+//思路：构建一个Map<author,arraylist<String>>存储作者属性信息，包括合著者、机构等。
+//再对列表进行循环处理，判断map.containsKey(author)，如果没有则添加新人。
+//去除空格trim()，对空值进行判断。
+//发现两处错误：①同一机构名称不一致，计划取其前几位；②因记录顺序不同，同一作者被分批不同的id，计划在初代消歧结束后，再进行第二次检验消歧，合并同一作者的不同id。
+//name_disambiguation1对作者机构做粗化处理，name_disambiguation2不对作者机构做粗化处理，具体选用哪种方式视情况而定。
+//个人推荐使用第二种name_disambiguation2.
+import java.io.*;
+import java.util.*;
+
+public class Name_disambiguation2 {
+	//map1和map2用于中文作者姓名首轮消歧。
+	static Map<String,ArrayList<String>> map1=new HashMap<>(); //map1用于存储原始作者-消歧作者，张三-arraylist<张三1，张三2，张三3>
+	static Map<String,ArrayList<String>> map2=new HashMap<>(); //map2用于存储消歧作者-作者属性，作者属性信息用arraylist数据包含合著者、机构等。
+	//map1_check和map2_check用于第二轮消歧结果校验，合并同一作者的不同id。
+	static Map<String,ArrayList<String>> map1_check=new HashMap<>();
+	static Map<String,ArrayList<String>> map2_check=new HashMap<>();
+	public static void main(String args[]){
+		String inputfile="c:/users/yys/desktop/原始作者-初稿.txt";
+		String outputfile="c:/users/yys/desktop/消歧作者.txt";
+
+		try{
+			BufferedReader bufr=new BufferedReader(new FileReader(new File(inputfile)));
+			//1.-----------------------------------------------------构建作者姓名消歧知识库，双层映射map1-map2。
+			String str=null;
+			while((str=bufr.readLine())!=null){
+				String str_arr[]=str.split("\t");//数组最后一位是机构，所以for循环i<str_arr.length-1。
+				String neworganization = str_arr[str_arr.length-1].trim();
+				String newauthor_record=str.replace(neworganization, "").trim();
+				//System.out.println(newauthor_record);
+				//对每一条记录进行循环，对每一个作者进行消歧
+				String newauthor_record_list[]=newauthor_record.split("\t");
+				for(int i=0;i<newauthor_record_list.length;i++){
+					 String newauthor=newauthor_record_list[i].trim();
+					 //---判断新作者是否为空
+					if(newauthor!=null){
+						 String newco_author=newauthor_record.replace(newauthor, "").replace("\t\t", "\t").trim();
+						 //System.out.println(newco_author);
+						 //1.1---判断新来作者的合著者-机构是否包含在已有消歧作者属性中.
+						 if(map1.containsKey(newauthor)){
+							 //已有消歧作者同新作者合著者、机构判断
+							 String newco_author_list[]=newco_author.split("\t");
+							 String neworganization_list[]=neworganization.split(";");
+
+							 //对于map1中包含的每个同名消歧作者
+							 boolean disam_judge=true;//如果新作者不能和已有消歧作者相匹配，则新增作者。
+							 ArrayList<String> disamauthor_arraylist=map1.get(newauthor);
+							 for(int j=0;j<disamauthor_arraylist.size();j++){
+								 //消歧作者属性列表。
+								 String disamauthor=disamauthor_arraylist.get(j);
+								 ArrayList<String> disamauthor_attribute_arraylist=map2.get(disamauthor);
+								 //1.2---判断消歧作者属性列表中是否包含新作者的合著者。
+								 if(Judge(disamauthor,newco_author_list,neworganization_list,map2.get(disamauthor))){
+									 disam_judge=false;
+									 break;
+								//1.3---判断消歧作者属性列表中是否包含新作者的机构。
+								 }else if(Judge(disamauthor,neworganization_list,newco_author_list,disamauthor_attribute_arraylist)){
+									 disam_judge=false;
+									 break;
+								 }else{
+									 continue;
+								 }
+							 }
+							 //1.4---如果新作者与已有同名消歧作者不匹配，即disam_judge=true，则执行下面程序。
+							 if(disam_judge){
+								 String newauthor_newname=newauthor+disamauthor_arraylist.size();
+								 disamauthor_arraylist.add(newauthor_newname);
+								 map1.put(newauthor, disamauthor_arraylist);
+								 ArrayList<String> newauthor_add_attribute_arraylist=new ArrayList<>();
+								 //添加新作者的合著者信息。
+								 for(String e:newco_author_list){
+									 newauthor_add_attribute_arraylist.add(e.trim());
+								 }
+								 //添加新作者的机构信息
+								 for(String e2:neworganization_list){
+									 newauthor_add_attribute_arraylist.add(e2.trim());
+								 }
+								 map2.put(newauthor_newname, newauthor_add_attribute_arraylist);
+							 }
+							  
+						 }else{
+							//1.5---map1中添加新作者newauthor。
+							 ArrayList<String> newauthor_addto_map1=new ArrayList<>();
+							 newauthor_addto_map1.add(newauthor);
+							 map1.put(newauthor, newauthor_addto_map1);
+							//map2中添加新作者的合著者
+							 ArrayList<String> newattribute_arraylist_addto_map2=new ArrayList<>();
+							 for(String e:newco_author.split("\t")){
+								 //System.out.println(e.trim());
+								 newattribute_arraylist_addto_map2.add(e.trim());
+								 //System.out.println(newattribute_arraylist_addto_map2);
+							 }
+							 //map2添加新作者的机构信息
+							 for(String e2:neworganization.split(";")){
+								 newattribute_arraylist_addto_map2.add(e2.trim());
+							 }
+							 //System.out.println(newattribute_arraylist_addto_map2);
+							 map2.put(newauthor, newattribute_arraylist_addto_map2);
+/*
+ * 							 bufw.write(newauthor+"\t");
+							 bufw.flush();
+ */
+						 }
+					 }else{
+						 continue;
+					 }
+			
+				}//新作者列表
+				//bufw.write(neworganization); 
+				//bufw.newLine();
+			}
+			//保留首轮姓名消歧校验数据
+			String outputfile2="c:/users/yys/desktop/checkout.txt";
+			BufferedWriter bufw2=new BufferedWriter(new FileWriter(new File(outputfile2)));
+			Iterator<String> it=map2.keySet().iterator();
+			while(it.hasNext()){
+				String key=it.next();
+				bufw2.write(key+"\t"+map2.get(key));
+				bufw2.newLine();
+
+			}
+			bufw2.close();
+			//2.-----------------------------------------------------------------消歧结果校验，合并同一作者的不同id。
+			map1_check=map1;
+			map2_check=map2;
+			Iterator<String> it_check=map1.keySet().iterator();
+			while(it_check.hasNext()){
+				String newauthor_disam_check=it_check.next();
+				//System.out.println(newauthor_disam_check);
+				//map1中包含的消歧姓名。
+				ArrayList<String> newauthor_disam_check_arraylist=map1.get(newauthor_disam_check);
+				//System.out.println(newauthor_disam_check_arraylist);
+				for(int m=0;m<newauthor_disam_check_arraylist.size();m++){
+					//①从初步消歧结果中取出第一个校验姓名newauthor_disam_check1.
+					String newauthor_disam_check1=newauthor_disam_check_arraylist.get(m);
+					//System.out.println(newauthor_disam_check1);
+					ArrayList<String> newauthor_disam_check1_arraylist=map2.get(newauthor_disam_check1);
+					//②从初步消歧结果中取出第二个校验姓名newauthor_disam_check2
+					for(int n=m+1;n<newauthor_disam_check_arraylist.size();n++ ){
+						String newauthor_disam_check2=newauthor_disam_check_arraylist.get(n);
+						//System.out.println(newauthor_disam_check2);
+						ArrayList<String> newauthor_disam_check2_arraylist=map2.get(newauthor_disam_check2);
+						//③对比newauthor_disam_check1和newauthor_disam_check2.
+						for(int p=0;p<newauthor_disam_check2_arraylist.size();p++){
+							if(newauthor_disam_check1_arraylist.contains(newauthor_disam_check2_arraylist.get(p))){
+								Integrate_author(newauthor_disam_check,newauthor_disam_check1,newauthor_disam_check2,map1_check,map2_check);
+							}else{
+								continue;
+							}
+						}
+					}
+				}
+			}
+			//3.-----------------------------------------------------------------对原始中文作者数据进行姓名消歧。
+			BufferedReader bufr2=new BufferedReader(new FileReader(new File(inputfile)));
+			BufferedWriter bufw=new BufferedWriter(new FileWriter(new File(outputfile)));
+			String str2=null;
+			while((str2=bufr2.readLine())!=null){
+				String str2_arr[]=str2.split("\t");//数组最后一位是机构，所以for循环i<str_arr.length-1。
+				String neworganization = str2_arr[str2_arr.length-1].trim();
+				String newauthor_record=str2.replace(neworganization, "").trim();
+				//System.out.println(newauthor_record);
+				//对每一条记录进行循环，对每一个作者进行消歧
+				String newauthor_record_list[]=newauthor_record.split("\t");
+				for(int i=0;i<newauthor_record_list.length;i++){
+					 String newauthor=newauthor_record_list[i].trim();
+					 String newco_author=newauthor_record.replace(newauthor, "").replace("\t\t", "\t").trim();
+					 if(map1_check.containsKey(newauthor)){
+						 String newco_author_list[]=newco_author.split("\t");
+						 String neworganization_list[]=neworganization.split(";");
+						 //对于map1_check中包含的每个同名消歧作者
+						 ArrayList<String> disamauthor_arraylist=map1_check.get(newauthor);
+						 for(int j=0;j<disamauthor_arraylist.size();j++){
+							 //消歧作者属性列表。
+							 String disamauthor=disamauthor_arraylist.get(j);
+							 ArrayList<String> disamauthor_attribute_arraylist=map2_check.get(disamauthor);
+							 if(Judge(disamauthor,newco_author_list,neworganization_list,disamauthor_attribute_arraylist)){	 
+ 								String newauthor_disam=disamauthor;
+                                bufw.write(newauthor_disam+"\t");
+								bufw.flush();
+								break;
+							//1.3---判断消歧作者属性列表中是否包含新作者的机构。
+							 }else if(Judge(disamauthor,neworganization_list,newco_author_list,disamauthor_attribute_arraylist)){
+								String newauthor_disam=disamauthor;
+                                bufw.write(newauthor_disam+"\t");
+								bufw.flush();
+								break;
+							 }else{
+								 continue;
+							 }
+							 }
+					 }
+				}
+				 bufw.newLine();
+			}
+			bufw.close();
+			System.out.println("输出完成");
+		}catch(Exception e){
+			e.printStackTrace();
+		}
+	}
+	//新作者合著者与消歧作者进行合著者判断。
+	public static boolean Judge(String disamauthor,String newco_author_list[],String neworganization_list[],ArrayList<String> disamauthor_attribute_arraylist){
+		boolean return_value=false;
+		System.out.println(disamauthor);
+		for(String temp:newco_author_list){
+			 if(disamauthor_attribute_arraylist.contains(temp)){
+				 for(String temp_add:newco_author_list){
+					 if(disamauthor_attribute_arraylist.contains(temp_add.trim())){
+						 continue;
+					 }else{
+						 disamauthor_attribute_arraylist.add(temp_add.trim());
+					 }
+				 }
+				 for(String temp_add:neworganization_list){
+					 if(disamauthor_attribute_arraylist.contains(temp_add.trim())){
+						 continue;
+					 }else{
+						 disamauthor_attribute_arraylist.add(temp_add.trim());
+					 }
+				 }
+				 map2.put(disamauthor, disamauthor_attribute_arraylist);
+				 return_value=true;
+			 }else{
+				 continue;
+			 }
+		 }
+		return return_value;
+	}
+	//初步消歧结果校验，合并同一作者的不同id。
+	public static void Integrate_author(String newauthor_disam_check,String newauthor_disam_check1,String newauthor_disam_check2,Map<String,ArrayList<String>> map1_check,Map<String, ArrayList<String>> map2_check){
+		ArrayList<String> newauthor_disam_check_arraylist=map1.get(newauthor_disam_check);
+		//在map1_check中删除重复的newauthor_disam_check2。
+		//System.out.println(newauthor_disam_check_arraylist);
+		newauthor_disam_check_arraylist.remove(newauthor_disam_check2);
+		map1_check.put(newauthor_disam_check, newauthor_disam_check_arraylist);
+		//将map2中newauthor_disam_check2的属性信息添加到map2的newauthor_disam_check1属性信息中，并在map2_check中删除newauthor_disam_check2.
+		ArrayList<String> newauthor_disam_check1_attribute_arraylist=map2.get(newauthor_disam_check1);
+		ArrayList<String> newauthor_disam_check2_attribute_arraylist=map2.get(newauthor_disam_check2);
+		//System.out.println(newauthor_disam_check2_attribute_arraylist);
+		if(newauthor_disam_check2_attribute_arraylist!=null){
+			for(int i=0;i<newauthor_disam_check2_attribute_arraylist.size();i++){
+				String attribute_check2=newauthor_disam_check2_attribute_arraylist.get(i);
+				if(newauthor_disam_check1_attribute_arraylist.contains(attribute_check2)){
+					continue;
+				}else{
+					newauthor_disam_check1_attribute_arraylist.add(attribute_check2);
+				}
+			}
+		}
+		map2_check.remove(newauthor_disam_check2);
+		map2_check.put(newauthor_disam_check1, newauthor_disam_check1_attribute_arraylist);
+	}
+}
